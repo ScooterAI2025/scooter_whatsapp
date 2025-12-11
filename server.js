@@ -58,7 +58,7 @@ app.post('/whatsapp/webhook', async (req, res) => {
     .create({
       from: message.to,
       to: message.from,
-      body: "Hey! we would get back to you"
+      body: process.env.PUBLIC_MESSAGE || 'Thank you for your message! We will get back to you shortly.', 
     })
     .then(msg => console.log('Sent with SID:', msg.sid))
     .catch(err => console.error(err));
@@ -102,7 +102,7 @@ app.post('/api/send-message', async (req, res) => {
   try {
     // 1) Send via Twilio
     const msg = await client.messages.create({
-      from: 'whatsapp:+918668755061', // your Twilio WhatsApp / sandbox number
+      from: `whatsapp:${process.env.FROM_NUMBER}`, // your Twilio WhatsApp / sandbox number
       to,
       body,
     });
