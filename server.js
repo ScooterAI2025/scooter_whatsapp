@@ -8,6 +8,7 @@ const app = express();
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = require('twilio')(accountSid, authToken);
+const reply=process.env.PUBLIC_MESSAGE || 'Thank you for your message! We will get back to you shortly.';
 // PostgreSQL connection
 const pool = new Pool({
   host: `/cloudsql/${process.env.INSTANCE_CONNECTION_NAME}`,
@@ -54,13 +55,14 @@ app.post('/whatsapp/webhook', async (req, res) => {
   //   const twiml = new MessagingResponse();
   //   //twiml.message('Message received!');
   //   res.type('text/xml').send(twiml.toString());
+
   client.messages
     .create({
       from: message.to,
       to: message.from,
-      body: process.env.PUBLIC_MESSAGE || 'Thank you for your message! We will get back to you shortly.', 
+      body: reply , 
     })
-    .then(msg => console.log('Sent with SID:', msg.sid))
+    .then(msg => {console.log('Sent with SID:', msg.sid);console.log('Auto-reply sent',reply)})
     .catch(err => console.error(err));
 
   res.json({ message: "Message received successfully" });
