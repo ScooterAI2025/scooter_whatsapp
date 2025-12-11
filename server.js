@@ -10,7 +10,7 @@ const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = require('twilio')(accountSid, authToken);
 // PostgreSQL connection
 const pool = new Pool({
-  host: process.env.HOST,
+  host: `/cloudsql/${process.env.INSTANCE_CONNECTION_NAME}`,
   port: process.env.DB_PORT,
   user: process.env.DB_USER,          // your user
   password: process.env.DB_PASSWORD,  // your password
