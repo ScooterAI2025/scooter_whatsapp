@@ -33,6 +33,52 @@ const port = process.env.PORT || 3000;
 app.get('/', (req, res) => {
   res.send('Twilio WhatsApp webhook is running');
 });
+const clients = new Map();
+// SSE endpoint for real-time updates
+app.get('/api/messages/stream', (req, res) => {
+  const clientId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  res.write(`data: ${JSON.stringify({ type: 'connected', clientId })}\n\n`);
+  clients.set(clientId, res);
+  console.log(`Client ${clientId} connected. Total: ${clients.size}`);
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(`: heartbeat\n\n`);
+    } catch (err) {
+      clearInterval(heartbeat);
+      clients.delete(clientId);
+    }
+  }, 30000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    clients.delete(clientId);
+    console.log(`Client ${clientId} disconnected. Total: ${clients.size}`);
+  });
+});
+
+function notifyClients(eventData) {
+  const data = JSON.stringify(eventData);
+  clients.forEach((clientRes, clientId) => {
+    try {
+      clientRes.write(`data: ${data}\n\n`);
+    } catch (err) {
+      clients.delete(clientId);
+    }
+  });
+}
+
+
+
+
 // Webhook to receive WhatsApp messages (INBOUND)
 app.post('/whatsapp/webhook', async (req, res) => {
   const { From, To, Body, MessageSid } = req.body;
@@ -44,11 +90,21 @@ app.post('/whatsapp/webhook', async (req, res) => {
     direction: 'inbound',
   };
   // console.log('Inbound message JSON:', message);
+  // try {
+  //   await pool.query(
+  //     'INSERT INTO messages (from_number, to_number, body, direction, message_sid) VALUES ($1, $2, $3, $4, $5)',
+  //     [message.from, message.to, message.body, message.direction, message.messageSid]
+  //   );
+  // } catch (err) {
   try {
-    await pool.query(
-      'INSERT INTO messages (from_number, to_number, body, direction, message_sid) VALUES ($1, $2, $3, $4, $5)',
+    const result = await pool.query(
+      'INSERT INTO messages (from_number, to_number, body, direction, message_sid) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       [message.from, message.to, message.body, message.direction, message.messageSid]
     );
+    
+    // Add this line
+    notifyClients({ type: 'new_message', message: result.rows[0] });
+    
   } catch (err) {
     console.error('DB insert error (inbound):', err);
   }
@@ -101,21 +157,39 @@ app.get('/api/conversations', async (req, res) => {
 app.post('/api/send-message', async (req, res) => {
   const { to, body } = req.body; // e.g. { "to": "whatsapp:+919363284383", "body": "Hello" }
 
+  // try {
+  //   // 1) Send via Twilio
+  //   const msg = await client.messages.create({
+  //     from: `whatsapp:${process.env.FROM_NUMBER}`, // your Twilio WhatsApp / sandbox number
+  //     to,
+  //     body,
+  //   });
+  //   // 2) Save outgoing message
+  //   await pool.query(
+  //     'INSERT INTO messages (from_number, to_number, body, direction, message_sid) VALUES ($1, $2, $3, $4, $5)',
+  //     ['whatsapp:+14155238886', to, body, 'outbound', msg.sid]
+  //   );
+
+  //   res.json({ success: true, sid: msg.sid });
+  // } catch (err) {
   try {
-    // 1) Send via Twilio
     const msg = await client.messages.create({
-      from: `whatsapp:${process.env.FROM_NUMBER}`, // your Twilio WhatsApp / sandbox number
+      from: `whatsapp:${process.env.FROM_NUMBER}`,
       to,
       body,
     });
-    // 2) Save outgoing message
-    await pool.query(
-      'INSERT INTO messages (from_number, to_number, body, direction, message_sid) VALUES ($1, $2, $3, $4, $5)',
+    
+    const result = await pool.query(
+      'INSERT INTO messages (from_number, to_number, body, direction, message_sid) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       ['whatsapp:+14155238886', to, body, 'outbound', msg.sid]
     );
 
+    // Add this line
+    notifyClients({ type: 'new_message', message: result.rows[0] });
+
     res.json({ success: true, sid: msg.sid });
   } catch (err) {
+
     console.error('Error sending outbound message:', err);
     res.status(500).json({ error: 'Failed to send' });
   }
