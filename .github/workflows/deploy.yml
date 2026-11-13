@@ -16,7 +16,7 @@ concurrency:
 env:
   # ===== EDIT PER REPOSITORY =====
   STAGING_APP: scooter-whatsapp-test          # [STAGING_APP]  (leave empty "" if jobs only)
-  PROD_APP: scooter-whatsapp-prod             # [PROD_APP]     (leave empty "" if jobs only)
+  PROD_APP: scooter-whatsapp             # [PROD_APP]     (leave empty "" if jobs only)
   IMAGE_BASE: scooter-whatsapp        # [IMAGE_BASE] -> builds -test / -prod
   DOCKERFILE: Dockerfile             # [DOCKERFILE]
   STAGING_JOBS: ""                   # [STAGING_JOBS] e.g. "blog-gc-test reminders-test"
