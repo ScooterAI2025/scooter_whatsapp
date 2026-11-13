@@ -10,13 +10,22 @@ const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = require('twilio')(accountSid, authToken);
 const reply=process.env.PUBLIC_MESSAGE || 'Thank you for your message! We will get back to you shortly.';
 // PostgreSQL connection
+const useCloudSqlSocket = !!process.env.INSTANCE_CONNECTION_NAME;
+
 const pool = new Pool({
-  host: `/cloudsql/${process.env.INSTANCE_CONNECTION_NAME}`,
-  port: process.env.DB_PORT,
-  user: process.env.DB_USER,          // your user
-  password: process.env.DB_PASSWORD,  // your password
-  database: process.env.DB_NAME,      // your database name
+  host: useCloudSqlSocket
+    ? `/cloudsql/${process.env.INSTANCE_CONNECTION_NAME}`
+    : process.env.DB_HOST,
+  port: Number(process.env.DB_PORT || 5432),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  ssl: useCloudSqlSocket ? false : { rejectUnauthorized: true },
+  max: 10,
+  idleTimeoutMillis: 30000,
 });
+
+pool.on('error', (err) => console.error('Postgres pool error:', err));
 // Body parsers
 app.use(express.urlencoded({ extended: false })); // for Twilio webhook (x-www-form-urlencoded)
 app.use(express.json());
