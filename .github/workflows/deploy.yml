@@ -1,0 +1,82 @@
+name: Deploy
+
+on:
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  # ===== EDIT PER REPOSITORY =====
+  STAGING_APP: scooter-whatsapp-test          # [STAGING_APP]  (leave empty "" if jobs only)
+  PROD_APP: scooter-whatsapp-prod             # [PROD_APP]     (leave empty "" if jobs only)
+  IMAGE_BASE: scooter-whatsapp        # [IMAGE_BASE] -> builds -test / -prod
+  DOCKERFILE: Dockerfile             # [DOCKERFILE]
+  STAGING_JOBS: ""                   # [STAGING_JOBS] e.g. "blog-gc-test reminders-test"
+  PROD_JOBS: ""                      # [PROD_JOBS]    e.g. "blog-gc-prod reminders-prod"
+  # ===== SHARED - DO NOT CHANGE =====
+  ACR: scooterbackendprod
+  RG: scooter_production_rg
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pick staging or production
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "APP=$PROD_APP"            >> $GITHUB_ENV
+            echo "JOBS=$PROD_JOBS"          >> $GITHUB_ENV
+            echo "IMAGE=$IMAGE_BASE-prod"   >> $GITHUB_ENV
+          else
+            echo "APP=$STAGING_APP"         >> $GITHUB_ENV
+            echo "JOBS=$STAGING_JOBS"       >> $GITHUB_ENV
+            echo "IMAGE=$IMAGE_BASE-test"   >> $GITHUB_ENV
+          fi
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build image in ACR
+        run: |
+          echo "Branch ${{ github.ref_name }} -> app '$APP', jobs '$JOBS', image $IMAGE"
+          az acr build -r $ACR -f $DOCKERFILE \
+            -t $IMAGE:${{ github.sha }} \
+            -t $IMAGE:${{ github.ref_name }} .
+
+      - name: Deploy app and jobs
+        run: |
+          az extension add --name containerapp --upgrade -y
+          IMG=$ACR.azurecr.io/$IMAGE:${{ github.sha }}
+          ID_BASE="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG"
+          ID_BASE="$ID_BASE/providers/Microsoft.ManagedIdentity/userAssignedIdentities"
+
+          if [ -n "$APP" ]; then
+            az containerapp registry set -n $APP -g $RG \
+              --server $ACR.azurecr.io --identity "$ID_BASE/$APP-id"
+            az containerapp update -n $APP -g $RG --image $IMG \
+              --revision-suffix ${GITHUB_SHA::7}
+            echo "App URL: https://$(az containerapp show -n $APP -g $RG \
+              --query properties.configuration.ingress.fqdn -o tsv)"
+          fi
+
+          for JOB in $JOBS; do
+            az containerapp job registry set -n $JOB -g $RG \
+              --server $ACR.azurecr.io --identity "$ID_BASE/$JOB-id"
+            az containerapp job update -n $JOB -g $RG --image $IMG
+            echo "Updated job $JOB"
+          done
